@@ -104,4 +104,10 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+//added for lab2 impl
+  int ticks;
+  int tickets;
+  int stride;
+  int pass;
 };

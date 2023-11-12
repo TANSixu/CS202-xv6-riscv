@@ -89,3 +89,20 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// impl for lab2
+uint64
+sys_schedstat(void)
+{
+  schedstat();
+  return 0;
+}
+
+uint64
+sys_schedtickets(void)
+{
+  int n;
+  argint(0, &n);
+  schedtickets(n);
+  return 0;
+}

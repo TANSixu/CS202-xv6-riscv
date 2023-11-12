@@ -6,6 +6,17 @@
 #include "proc.h"
 #include "defs.h"
 
+#define MAX_TICKET 10000
+#define STRIDE_CONST 10000
+
+unsigned short lfsr = 0xACE1u;
+unsigned short bit;
+unsigned short rand(void)
+{
+  bit = ((lfsr >> 0) ^ (lfsr >> 2) ^ (lfsr >> 3) ^ (lfsr >> 5)) & 1;
+  return lfsr = (lfsr >> 1) | (bit << 15);
+}
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -55,6 +66,10 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
+      p->tickets = 10;
+      p->stride = (int)(STRIDE_CONST/10);
+      p->ticks = 0;
+      p->pass = p->stride;
   }
 }
 
@@ -441,6 +456,107 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+#if defined(LOTTERY)
+
+//lottery scheduler
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct cpu *c = mycpu();
+  
+  c->proc = 0;
+  for(;;){
+    // Avoid deadlock by ensuring that devices can interrupt.
+    intr_on();
+
+//step1. count total
+    int total = 0;
+    for(p=proc; p<&proc[NPROC]; p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        total += p->tickets;
+      }
+      release(&p->lock);
+    }
+
+    int lottery = rand()%total;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        // Switch to chosen process.  It is the process's job
+        // to release its lock and then reacquire it
+        // before jumping back to us.
+        if(p->tickets > lottery){
+          p->state = RUNNING;
+          p->ticks += 1;
+          c->proc = p;
+          swtch(&c->context, &p->context);
+
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+          release(&p->lock);
+          break;
+        }else{
+          lottery -= p->tickets;
+        }
+      }
+      release(&p->lock);
+    }
+  }
+}
+
+#elif defined(STRIDE)
+// stride
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct proc *pp = proc; //default
+  struct cpu *c = mycpu();
+  
+  c->proc = 0;
+  for(;;){
+    // Avoid deadlock by ensuring that devices can interrupt.
+    intr_on();
+
+//step1. find smallest
+    int cur_pass = __INT_MAX__;
+    for(p=proc; p<&proc[NPROC]; p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        if(p->pass < cur_pass){
+          pp = p;
+          cur_pass = pp->pass;
+        }
+      }
+      release(&p->lock);
+    }
+
+
+//step2. switch
+      acquire(&pp->lock);
+      if(pp->state == RUNNABLE) {
+        // Switch to chosen process.  It is the process's job
+        // to release its lock and then reacquire it
+        // before jumping back to us.
+
+          pp->state = RUNNING;
+          pp->ticks += 1;
+          pp->pass += pp->stride;
+          c->proc = pp;
+          swtch(&c->context, &pp->context);
+
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+      }
+      release(&pp->lock);
+  }
+}
+
+#else
 void
 scheduler(void)
 {
@@ -459,6 +575,7 @@ scheduler(void)
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
+        p->ticks += 1;
         c->proc = p;
         swtch(&c->context, &p->context);
 
@@ -470,6 +587,7 @@ scheduler(void)
     }
   }
 }
+#endif
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -680,4 +798,32 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void
+schedstat(void)
+{
+  struct proc *p;
+
+  printf("\n");
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state == UNUSED)
+      continue;
+
+    printf("%d(%s): tickets: %d, ticks: %d", p->pid, p->name, p->tickets, p->ticks);
+    printf("\n");
+  }
+}
+
+void
+schedtickets(int n)
+{
+  struct proc *p = myproc();
+  acquire(&p->lock);
+  if(n<=MAX_TICKET && n>=0){
+    p->tickets = n;
+    p->stride = (int)(STRIDE_CONST/p->tickets);
+    p->pass = p->stride;
+  }
+  release(&p->lock);
 }
