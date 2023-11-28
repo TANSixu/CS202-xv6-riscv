@@ -110,4 +110,8 @@ struct proc {
   int tickets;
   int stride;
   int pass;
+
+// added for lab3
+  int thread_id;
+  int thread_cnt;
 };

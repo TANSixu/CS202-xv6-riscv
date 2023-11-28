@@ -43,3 +43,6 @@ void *memcpy(void *, const void *, uint);
 // lab2
 int sched_statistics(void);
 int sched_tickets(int);
+
+// lab3
+int clone(int);

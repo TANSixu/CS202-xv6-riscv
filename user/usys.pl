@@ -40,3 +40,6 @@ entry("uptime");
 # lab2
 entry("sched_statistics");
 entry("sched_tickets");
+
+# lab3
+entry("clone");

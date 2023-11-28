@@ -22,3 +22,4 @@
 #define SYS_close  21
 #define SYS_sched_statistics 22
 #define SYS_sched_tickets 23
+#define SYS_clone 24

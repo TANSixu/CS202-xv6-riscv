@@ -106,3 +106,12 @@ sys_schedtickets(void)
   schedtickets(n);
   return 0;
 }
+
+uint64 
+sys_clone(void)
+{
+  uint64 p;
+  argaddr(0, &p);
+  clone((void*)p);
+  return 0;
+}

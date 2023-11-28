@@ -70,6 +70,8 @@ procinit(void)
       p->stride = (int)(STRIDE_CONST/10);
       p->ticks = 0;
       p->pass = p->stride;
+      p->thread_id = 0;
+      p->thread_cnt = 0;
   }
 }
 
@@ -175,6 +177,26 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  p->pagetable = 0;
+  p->sz = 0;
+  p->pid = 0;
+  p->parent = 0;
+  p->name[0] = 0;
+  p->chan = 0;
+  p->killed = 0;
+  p->xstate = 0;
+  p->state = UNUSED;
+}
+
+//lab3 for thread, not free shared resource
+static void
+freeproc_thread(struct proc *p)
+{
+  if(p->trapframe)
+    kfree((void*)p->trapframe);
+  p->trapframe = 0;
+  if(p->pagetable)
+    uvmunmap(p->pagetable, TRAPFRAME-PGSIZE*p->thread_id, 1, 1);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -419,20 +441,40 @@ wait(uint64 addr)
         // make sure the child isn't still in exit() or swtch().
         acquire(&pp->lock);
 
-        havekids = 1;
-        if(pp->state == ZOMBIE){
-          // Found one.
-          pid = pp->pid;
-          if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
-                                  sizeof(pp->xstate)) < 0) {
+        if(pp->thread_id == 0){
+          // process, not child thread
+          havekids = 1;
+          if(pp->state == ZOMBIE){
+            // Found one.
+            pid = pp->pid;
+            if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
+                                    sizeof(pp->xstate)) < 0) {
+              release(&pp->lock);
+              release(&wait_lock);
+              return -1;
+            }
+            freeproc(pp);
             release(&pp->lock);
             release(&wait_lock);
-            return -1;
+            return pid;
           }
-          freeproc(pp);
-          release(&pp->lock);
-          release(&wait_lock);
-          return pid;
+        }else{
+          //child thread, not process
+                    havekids = 1;
+          if(pp->state == ZOMBIE){
+            // Found one.
+            pid = pp->pid;
+            if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
+                                    sizeof(pp->xstate)) < 0) {
+              release(&pp->lock);
+              release(&wait_lock);
+              return -1;
+            }
+            freeproc_thread(pp);
+            release(&pp->lock);
+            release(&wait_lock);
+            return pid;
+          }
         }
         release(&pp->lock);
       }
@@ -826,4 +868,120 @@ schedtickets(int n)
     p->pass = p->stride;
   }
   release(&p->lock);
+}
+
+
+// For lab3, modified from allocproc
+static struct proc*
+allocproc_thread(struct proc* parent)
+{
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if(p->state == UNUSED) {
+      goto found;
+    } else {
+      release(&p->lock);
+    }
+  }
+  return 0;
+
+found:
+  p->pid = allocpid();
+  p->thread_id = parent->thread_cnt + 1;
+  parent->thread_cnt++;
+  p->state = USED;
+
+  // Allocate a trapframe page.
+  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  // An empty user page table.
+  p->pagetable = parent->pagetable;
+
+  //map trapframe under the parent's
+  if(mappages(p->pagetable, TRAPFRAME-PGSIZE*p->thread_id, PGSIZE, 
+        (uint64)(p->trapframe), PTE_R | PTE_W)<0){
+          freeproc(p);
+          release(&p->lock);
+          return 0;
+        }
+
+  // Set up new context to start executing at forkret,
+  // which returns to user space.
+  memset(&p->context, 0, sizeof(p->context));
+  p->context.ra = (uint64)forkret;
+  p->context.sp = p->kstack + PGSIZE;
+
+  return p;
+}
+
+
+int
+clone(void* stack)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *p = myproc();
+
+  // Allocate process.
+  if((np = allocproc_thread(p)) == 0){
+    return -1;
+  }
+
+  // Copy user memory from parent to child.
+  // if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  //   freeproc(np);
+  //   release(&np->lock);
+  //   return -1;
+  // }
+
+  //Only copy stack
+  // if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  //   freeproc(np);
+  //   release(&np->lock);
+  //   return -1;
+  // }
+  np->sz = p->sz;
+
+  // copy saved user registers.
+  *(np->trapframe) = *(p->trapframe);
+
+  // Cause fork to return 0 in the child.
+  np->trapframe->a0 = 0;
+
+  //Set child stack
+  if(stack){
+    np->trapframe->sp = (uint64)stack;
+  }else{
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  // increment reference counts on open file descriptors.
+  for(i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+
+  pid = np->pid;
+
+  release(&np->lock);
+
+  acquire(&wait_lock);
+  np->parent = p;
+  release(&wait_lock);
+
+  acquire(&np->lock);
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  return pid;
 }

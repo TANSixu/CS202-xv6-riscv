@@ -103,6 +103,7 @@ extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_schedstat(void);
 extern uint64 sys_schedtickets(void);
+extern uint64 sys_clone(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -130,6 +131,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_close]   sys_close,
 [SYS_sched_statistics] sys_schedstat,
 [SYS_sched_tickets] sys_schedtickets,
+[SYS_clone] sys_clone,
 };
 
 void

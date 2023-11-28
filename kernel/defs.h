@@ -189,6 +189,9 @@ void            virtio_disk_intr(void);
 void            schedstat(void);
 void            schedtickets(int);
 
+//lab3
+int             clone(void*);
+
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
 
