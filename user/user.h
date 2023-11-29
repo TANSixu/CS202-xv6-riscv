@@ -45,4 +45,4 @@ int sched_statistics(void);
 int sched_tickets(int);
 
 // lab3
-int clone(int);
+int clone(void*);

@@ -112,6 +112,5 @@ sys_clone(void)
 {
   uint64 p;
   argaddr(0, &p);
-  clone((void*)p);
-  return 0;
+  return clone((void*)p);
 }

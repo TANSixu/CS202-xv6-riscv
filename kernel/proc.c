@@ -196,7 +196,7 @@ freeproc_thread(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
   if(p->pagetable)
-    uvmunmap(p->pagetable, TRAPFRAME-PGSIZE*p->thread_id, 1, 1);
+    uvmunmap(p->pagetable, TRAPFRAME-PGSIZE*p->thread_id, 1, 0);
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
